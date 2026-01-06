@@ -1,0 +1,17 @@
+{
+  "type": "module",
+  "name": "gurumcp-freshservice",
+  "version": "1.0.0",
+  "main": "api/freshservice-webhook.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "openai": "^6.15.0",
+    "@vercel/kv": "^1.0.0"
+  }
+}

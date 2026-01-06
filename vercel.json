@@ -1,0 +1,17 @@
+{
+  "functions": {
+    "api/freshservice-webhook.js": {
+      "maxDuration": 60
+    },
+    "api/worker.js": {
+      "maxDuration": 300
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/worker",
+      "schedule": "*/1 * * * *"
+    }
+  ]
+}
+
