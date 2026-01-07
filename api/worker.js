@@ -699,15 +699,26 @@ async function processOneJob(job) {
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+    // Allow Vercel Cron (GET) and manual trigger (POST)
+    if (req.method !== "GET" && req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
 
     const isCron = req.headers["x-vercel-cron"] === "1";
+
+    // If it's not cron, require WORKER_KEY
     if (!isCron) {
       const key = req.headers["x-worker-key"];
       if (key !== WORKER_KEY) return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const maxJobs = Math.max(1, Math.min(5, Number(req.body?.maxJobs || 1)));
+    // maxJobs from POST body or GET query (?maxJobs=3)
+    const maxJobsRaw =
+      req.method === "POST"
+        ? req.body?.maxJobs
+        : (req.query?.maxJobs || req.url?.split("maxJobs=")[1]);
+
+    const maxJobs = Math.max(1, Math.min(5, Number(maxJobsRaw || 1)));
 
     const processed = [];
     for (let i = 0; i < maxJobs; i++) {
