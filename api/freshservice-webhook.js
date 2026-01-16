@@ -41,20 +41,43 @@ export default async function handler(req, res) {
     await enqueueJob({
       jobId,
       ticketId,
-        company,
-        subject,
-        description,
+      company,
+      subject,
+      description,
       vip,
       createdAt: Date.now(),
     });
 
     // Fire-and-forget trigger worker once (best effort)
     // If this fails, cron will still drain the queue.
-    fetch(`${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}/api/worker`, {
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}`;
+
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 5000);
+
+    void fetch(`${baseUrl}/api/worker`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-WORKER-KEY": WORKER_KEY },
+      headers: {
+        "Content-Type": "application/json",
+        "X-WORKER-KEY": WORKER_KEY,
+      },
       body: JSON.stringify({ maxJobs: 1 }),
-    }).catch(() => {});
+      signal: ac.signal,
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          const text = await r.text().catch(() => "");
+          console.warn("Worker kick failed:", r.status, text);
+        }
+      })
+      .catch((err) => {
+        console.warn("Worker kick error:", err?.name || err, err?.message || "");
+      })
+      .finally(() => {
+        clearTimeout(t);
+      });
 
     return res.status(200).json({ ok: true, enqueued: true, jobId });
   } catch (e) {
@@ -62,4 +85,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: String(e?.message || e) });
   }
 }
-
