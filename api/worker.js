@@ -704,7 +704,10 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const isCron = req.headers["x-vercel-cron"] === "1";
+    const ua = req.headers["user-agent"] || "";
+    const isCron =
+  req.headers["x-vercel-cron"] != null ||
+  ua.includes("vercel-cron/1.0");
 
     // If it's not cron, require WORKER_KEY
     if (!isCron) {
