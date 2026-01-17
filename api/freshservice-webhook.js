@@ -49,27 +49,45 @@ export default async function handler(req, res) {
     });
 
     // Kick the worker (best effort). Don't wait for completion; cron will drain if this fails.
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}`;
+    // Build a reliable origin across Vercel prod/preview and proxies.
+    const proto = (req.headers["x-forwarded-proto"] || "https").toString().split(",")[0].trim();
+    const forwardedHost = (req.headers["x-forwarded-host"] || "").toString().split(",")[0].trim();
+    const host = (req.headers.host || "").toString().trim();
+    const vercelHost = (process.env.VERCEL_URL || "").toString().trim();
 
-    void fetch(`${baseUrl}/api/worker`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-WORKER-KEY": WORKER_KEY,
-      },
-      body: JSON.stringify({ maxJobs: 1 }),
-    })
-      .then(async (r) => {
-        if (!r.ok) {
-          const text = await r.text().catch(() => "");
-          console.warn("Worker kick failed:", r.status, text);
-        }
+    const originHost = vercelHost || forwardedHost || host;
+    if (!originHost) {
+      console.warn("Worker kick skipped: no host available (VERCEL_URL/x-forwarded-host/host all empty)");
+    } else {
+      const origin = `${proto}://${originHost}`;
+
+      void fetch(`${origin}/api/worker`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-WORKER-KEY": WORKER_KEY,
+        },
+        body: JSON.stringify({ maxJobs: 1 }),
       })
-      .catch((err) => {
-        console.warn("Worker kick error:", err?.name || err, err?.message || "");
-      });
+        .then(async (r) => {
+          if (!r.ok) {
+            const text = await r.text().catch(() => "");
+            console.warn("Worker kick failed:", r.status, text);
+          }
+        })
+        .catch((err) => {
+          // TypeError: fetch failed usually means DNS/TLS/origin issues.
+          console.warn(
+            "Worker kick error:",
+            err?.name || err,
+            err?.message || "",
+            "originHost=",
+            originHost,
+            "proto=",
+            proto
+          );
+        });
+    }
 
     return res.status(200).json({ ok: true, enqueued: true, jobId });
   } catch (e) {
