@@ -48,14 +48,10 @@ export default async function handler(req, res) {
       createdAt: Date.now(),
     });
 
-    // Fire-and-forget trigger worker once (best effort)
-    // If this fails, cron will still drain the queue.
+    // Kick the worker (best effort). Don't wait for completion; cron will drain if this fails.
     const baseUrl = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host}`;
-
-    const ac = new AbortController();
-    const t = setTimeout(() => ac.abort(), 5000);
 
     void fetch(`${baseUrl}/api/worker`, {
       method: "POST",
@@ -64,7 +60,6 @@ export default async function handler(req, res) {
         "X-WORKER-KEY": WORKER_KEY,
       },
       body: JSON.stringify({ maxJobs: 1 }),
-      signal: ac.signal,
     })
       .then(async (r) => {
         if (!r.ok) {
@@ -74,9 +69,6 @@ export default async function handler(req, res) {
       })
       .catch((err) => {
         console.warn("Worker kick error:", err?.name || err, err?.message || "");
-      })
-      .finally(() => {
-        clearTimeout(t);
       });
 
     return res.status(200).json({ ok: true, enqueued: true, jobId });
