@@ -180,16 +180,25 @@ function normalize(s) {
   return String(s || "").trim().toLowerCase();
 }
 
-function isInternalOrClientCompanyCard(card, companyBoardId) {
+function isInternalOrClientCompanyCard(card, companyBoardId, companyName) {
   const colId = card?.collection?.id;
   if (!colId) return false;
 
   if (colId === INTERNAL_COLLECTION_ID) return true;
 
   if (colId === CLIENTS_COLLECTION_ID) {
-    if (!companyBoardId) return false;
     const boards = Array.isArray(card?.boards) ? card.boards : [];
-    return boards.some((b) => b?.id === companyBoardId);
+
+    // Preferred: strict board-id match when detected.
+    if (companyBoardId) {
+      return boards.some((b) => b?.id === companyBoardId);
+    }
+
+    // Fallback: if board-id detection failed, allow cards that clearly live in the
+    // company folder by matching company name to board titles.
+    const company = normalize(companyName);
+    if (!company) return false;
+    return boards.some((b) => normalize(b?.title).includes(company));
   }
 
   return false;
@@ -315,7 +324,7 @@ function exemptionsLikelyRelevant(exemptionsText, subject, description) {
 /** -----------------------------
  * Enforce scope on answer sources (post-check)
  * ----------------------------- */
-async function filterAnswerSourcesToAllowedScope(sources, companyBoardId) {
+async function filterAnswerSourcesToAllowedScope(sources, companyBoardId, companyName) {
   const allowed = [];
   const rejected = [];
 
@@ -332,7 +341,7 @@ async function filterAnswerSourcesToAllowedScope(sources, companyBoardId) {
         args: { id: cardId },
       });
 
-      if (isInternalOrClientCompanyCard(card, companyBoardId)) {
+      if (isInternalOrClientCompanyCard(card, companyBoardId, companyName)) {
         allowed.push(s);
       } else {
         rejected.push({ source: s, reason: "outside allowed collection/board scope" });
@@ -527,7 +536,7 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
   }
 
   const exCardId =
-    exCard && isInternalOrClientCompanyCard(exCard, companyBoardId) ? exCard.id : null;
+    exCard && isInternalOrClientCompanyCard(exCard, companyBoardId, company) ? exCard.id : null;
 
   let exemptionsText = "";
   let exCardFull = null;
@@ -564,7 +573,7 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
   if (!companyBoardId) companyBoardId = findCompanyBoardIdFromResults(policyResults, company);
 
   const scopedPolicyResults = policyResults.filter((c) =>
-    isInternalOrClientCompanyCard(c, companyBoardId)
+    isInternalOrClientCompanyCard(c, companyBoardId, company)
   );
 
   const scopedContextSummary = scopedPolicyResults
@@ -615,7 +624,7 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
 
   // 6) Enforce scope on returned sources
   const { allowed: allowedSources, rejected: rejectedSources } =
-    await filterAnswerSourcesToAllowedScope(sources, companyBoardId);
+    await filterAnswerSourcesToAllowedScope(sources, companyBoardId, company);
 
   const contextSources = [
     ...(scopedPolicyResults || []).slice(0, 8).map(cardToSource).filter(Boolean),
