@@ -268,38 +268,101 @@ function scoreExemptionsCard(card) {
 }
 
 /** -----------------------------
+ * MCP result unwrapping helpers
+ * ----------------------------- */
+function tryParseJsonString(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+// Guru MCP tools may return `result` directly OR wrapped in MCP "content" blocks.
+// This normalizes common shapes into a plain JS value.
+function unwrapMcpResult(maybeWrapped) {
+  if (maybeWrapped == null) return maybeWrapped;
+
+  // If the server returned a JSON string, parse it.
+  if (typeof maybeWrapped === "string") {
+    const parsed = tryParseJsonString(maybeWrapped);
+    return parsed ?? maybeWrapped;
+  }
+
+  // Common MCP shape: { content: [ { type: 'text', text: '...json...' } ] }
+  const content = maybeWrapped?.content;
+  if (Array.isArray(content) && content.length) {
+    const first = content[0];
+
+    if (first?.type === "json") {
+      // Some MCP servers return {type:'json', json: <value>}
+      return first.json ?? maybeWrapped;
+    }
+
+    if (first?.type === "text" && typeof first.text === "string") {
+      const parsed = tryParseJsonString(first.text);
+      return parsed ?? first.text;
+    }
+
+    // If it's already a value list, return it.
+    if (Array.isArray(first)) return first;
+  }
+
+  return maybeWrapped;
+}
+
+/** -----------------------------
  * Tool result helpers
  * ----------------------------- */
 function coerceSearchResultsToArray(searchResult) {
-  // In your examples, guru_search_documents returns an array of card objects.
-  if (!searchResult) return [];
-  if (Array.isArray(searchResult)) return searchResult;
+  const unwrapped = unwrapMcpResult(searchResult);
+  if (!unwrapped) return [];
 
-  // Some servers might wrap it (rare)
-  if (Array.isArray(searchResult.results)) return searchResult.results;
-  if (Array.isArray(searchResult.documents)) return searchResult.documents;
-  if (Array.isArray(searchResult.items)) return searchResult.items;
+  // Already an array
+  if (Array.isArray(unwrapped)) return unwrapped;
 
-  // If it's a single card-ish object
-  if (searchResult?.id && searchResult?.collection?.id) return [searchResult];
+  // Wrapped list shapes
+  if (Array.isArray(unwrapped.results)) return unwrapped.results;
+  if (Array.isArray(unwrapped.documents)) return unwrapped.documents;
+  if (Array.isArray(unwrapped.items)) return unwrapped.items;
+  if (Array.isArray(unwrapped.cards)) return unwrapped.cards;
+  if (Array.isArray(unwrapped.data)) return unwrapped.data;
+
+  // If it came back as text that contains JSON, unwrapMcpResult will have parsed it.
+  // If it is still a string here, we can't coerce it to cards.
+  if (typeof unwrapped === "string") return [];
+
+  // Single card-ish object
+  if (unwrapped?.id) return [unwrapped];
 
   return [];
 }
 
 function formatAnswerResult(answerResult) {
-  if (!answerResult) return { answerText: "", sources: [] };
+  const unwrapped = unwrapMcpResult(answerResult);
+  if (!unwrapped) return { answerText: "", sources: [] };
 
-  if (typeof answerResult.answer === "string") {
+  // Most common: object with {answer, sources}
+  if (typeof unwrapped === "object" && typeof unwrapped.answer === "string") {
     return {
-      answerText: answerResult.answer.trim(),
-      sources: Array.isArray(answerResult.sources) ? answerResult.sources : [],
+      answerText: unwrapped.answer.trim(),
+      sources: Array.isArray(unwrapped.sources) ? unwrapped.sources : [],
     };
   }
 
-  // Fallback
+  // Some implementations may return { content: '...' }
+  if (typeof unwrapped === "object" && typeof unwrapped.content === "string") {
+    return { answerText: unwrapped.content.trim(), sources: [] };
+  }
+
+  // Fallbacks
+  if (typeof unwrapped === "string") {
+    return { answerText: unwrapped.trim(), sources: [] };
+  }
+
   return {
-    answerText: typeof answerResult === "string" ? answerResult : JSON.stringify(answerResult, null, 2),
-    sources: [],
+    answerText: JSON.stringify(unwrapped, null, 2),
+    sources: Array.isArray(unwrapped?.sources) ? unwrapped.sources : [],
   };
 }
 
@@ -724,6 +787,9 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
           answerSources: (sources || []).length,
           allowedAnswerSources: (allowedSources || []).length,
           rejectedAnswerSources: (rejectedSources || []).length,
+          companyResultsRaw: (companyResults || []).length,
+          policyResultsRaw: (policyResults || []).length,
+          exResultsRaw: (exResults || []).length,
         },
         null,
         2
