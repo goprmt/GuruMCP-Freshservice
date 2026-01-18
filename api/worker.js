@@ -511,6 +511,10 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
   // Determine company board/folder id
   let companyBoardId = findCompanyBoardIdFromResults(exResults, company);
 
+  // Keep a reference to company search results so we can cite the specific
+  // company context card(s) that informed the answer (e.g., "uses Microsoft 365").
+  let companyResults = [];
+
   // If not found, discover company board by searching company name broadly
   if (!companyBoardId) {
     const companySearchRaw = await guruToolCall({
@@ -520,7 +524,7 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
         agentId: GURU_AGENT_ID,
       },
     });
-    const companyResults = coerceSearchResultsToArray(companySearchRaw);
+    companyResults = coerceSearchResultsToArray(companySearchRaw);
     companyBoardId = findCompanyBoardIdFromResults(companyResults, company);
   }
 
@@ -568,6 +572,19 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
     },
   });
   const policyResults = coerceSearchResultsToArray(policySearchRaw);
+
+  // If we haven't done a company search yet (because board-id was detected earlier),
+  // do a lightweight company search now so we can cite the company context cards.
+  if (!companyResults.length) {
+    const companySearchRaw2 = await guruToolCall({
+      name: "guru_search_documents",
+      args: {
+        query: `${company}`,
+        agentId: GURU_AGENT_ID,
+      },
+    });
+    companyResults = coerceSearchResultsToArray(companySearchRaw2);
+  }
 
   // If company board still unknown, infer from policy results
   if (!companyBoardId) companyBoardId = findCompanyBoardIdFromResults(policyResults, company);
@@ -626,7 +643,15 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
   const { allowed: allowedSources, rejected: rejectedSources } =
     await filterAnswerSourcesToAllowedScope(sources, companyBoardId, company);
 
+  const scopedCompanyResults = (companyResults || []).filter((c) =>
+    isInternalOrClientCompanyCard(c, companyBoardId, company)
+  );
+
   const contextSources = [
+    // Prefer the most relevant company context cards first (often includes "client basics" / platform info)
+    ...(scopedCompanyResults || []).slice(0, 5).map(cardToSource).filter(Boolean),
+
+    // Then include any scoped policy/process docs that were used for gating/steps
     ...(scopedPolicyResults || []).slice(0, 8).map(cardToSource).filter(Boolean),
   ];
 
@@ -647,6 +672,26 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
   ]);
 
   const sourcesHtml = renderSourcesAsHtmlLinks(sourcesUsed);
+
+  if (!sourcesUsed.length) {
+    console.warn(
+      "No scoped sources to cite.",
+      JSON.stringify(
+        {
+          company,
+          companyBoardId: companyBoardId || null,
+          exCardId: exCardId || null,
+          scopedCompanyResults: scopedCompanyResults.length,
+          scopedPolicyResults: scopedPolicyResults.length,
+          answerSources: (sources || []).length,
+          allowedAnswerSources: (allowedSources || []).length,
+          rejectedAnswerSources: (rejectedSources || []).length,
+        },
+        null,
+        2
+      )
+    );
+  }
 
   let runbook;
   if (answerText) {
