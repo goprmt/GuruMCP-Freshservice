@@ -174,6 +174,44 @@ async function guruToolCall({ name, args }) {
 }
 
 /** -----------------------------
+ * Hydrate thin search results into full cards
+ * ----------------------------- */
+async function hydrateCards(cards, maxToHydrate = 10) {
+  const arr = Array.isArray(cards) ? cards : [];
+  const out = [];
+
+  for (let i = 0; i < Math.min(arr.length, maxToHydrate); i++) {
+    const c = arr[i];
+
+    // If it already looks like a full card, keep it.
+    if (c?.collection?.id && Array.isArray(c?.boards) && c?.slug) {
+      out.push(c);
+      continue;
+    }
+
+    // Otherwise, try to hydrate via get_card_by_id.
+    if (c?.id) {
+      try {
+        const full = await guruToolCall({
+          name: "guru_get_card_by_id",
+          args: { id: c.id },
+        });
+        out.push(full);
+        continue;
+      } catch {
+        // fall through and keep original
+      }
+    }
+
+    out.push(c);
+  }
+
+  // Keep remainder unhydrated to avoid too many lookups.
+  for (let i = maxToHydrate; i < arr.length; i++) out.push(arr[i]);
+  return out;
+}
+
+/** -----------------------------
  * Normalization + scoping helpers
  * ----------------------------- */
 function normalize(s) {
@@ -506,7 +544,7 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
       agentId: GURU_AGENT_ID,
     },
   });
-  const exResults = coerceSearchResultsToArray(exSearchRaw);
+  const exResults = await hydrateCards(coerceSearchResultsToArray(exSearchRaw), 10);
 
   // Determine company board/folder id
   let companyBoardId = findCompanyBoardIdFromResults(exResults, company);
@@ -524,7 +562,7 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
         agentId: GURU_AGENT_ID,
       },
     });
-    companyResults = coerceSearchResultsToArray(companySearchRaw);
+    companyResults = await hydrateCards(coerceSearchResultsToArray(companySearchRaw), 10);
     companyBoardId = findCompanyBoardIdFromResults(companyResults, company);
   }
 
@@ -571,7 +609,7 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
       agentId: GURU_AGENT_ID,
     },
   });
-  const policyResults = coerceSearchResultsToArray(policySearchRaw);
+  const policyResults = await hydrateCards(coerceSearchResultsToArray(policySearchRaw), 10);
 
   // If we haven't done a company search yet (because board-id was detected earlier),
   // do a lightweight company search now so we can cite the company context cards.
@@ -583,7 +621,7 @@ async function runPipelineAndPostNote({ ticketId, company, subject, description,
         agentId: GURU_AGENT_ID,
       },
     });
-    companyResults = coerceSearchResultsToArray(companySearchRaw2);
+    companyResults = await hydrateCards(coerceSearchResultsToArray(companySearchRaw2), 10);
   }
 
   // If company board still unknown, infer from policy results
