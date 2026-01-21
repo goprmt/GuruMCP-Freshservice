@@ -93,6 +93,8 @@ function renderRunbookHtml({ company, runbook, sourcesHtml, followUps, signals }
 
 <h4>🧭 Runbook: ${escapeHtml(runbook.title)}</h4>
 <p><strong>Summary:</strong> ${escapeHtml(runbook.summary)}</p>
+<p><strong>Approvals:</strong> ${runbook.approvals?.required ? "✅ Required" : "❌ Not explicitly required"}</p>
+<p style="color:#555; margin-top:-8px;">${escapeHtml(runbook.approvals?.rationale || "")}</p>
 
 ${runbook.prerequisites?.length ? `
 <p><strong>Prerequisites / Confirm:</strong></p>
@@ -101,9 +103,6 @@ ${runbook.prerequisites?.length ? `
 
 <p><strong>Steps:</strong></p>
 <ol>${stepsHtml}</ol>
-
-<p><strong>Approvals:</strong> ${runbook.approvals?.required ? "✅ Required" : "❌ Not explicitly required"}</p>
-<p style="color:#555; margin-top:-8px;">${escapeHtml(runbook.approvals?.rationale || "")}</p>
 
 ${runbook.escalation?.length ? `
 <p><strong>Escalation:</strong></p>
